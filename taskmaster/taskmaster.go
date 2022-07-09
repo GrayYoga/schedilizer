@@ -12,26 +12,61 @@ type Task struct {
 	Duration      time.Duration `json:"duration"`
 	HumanDuration string        `json:"human_duration"`
 	Mode          string        `json:"Mode"`
-	Num           int           `json:"Number"`
+	Num           int           `json:"-"`
 }
 
 type TaskList struct {
 	Tasks []Task
 }
 
-func (t *TaskList) Add(duration string, mode string, number int) {
-	timeDuration, _ := time.ParseDuration(duration)
-	t.Tasks = append(t.Tasks, Task{timeDuration, duration, mode, number})
+type TasksDurations struct {
+	Durations      time.Duration
+	HumanDurations string
 }
 
-func (t *TaskList) Next() Task {
+var (
+	runned bool
+	wgSync sync.WaitGroup
+)
+
+func (t *TaskList) Add(duration string, mode string, number int) Task {
+	timeDuration, _ := time.ParseDuration(duration)
+	task := Task{timeDuration, duration, mode, number}
+	t.Tasks = append(t.Tasks, task)
+	return task
+}
+
+func (t *TaskList) Pop() Task {
 	first := t.Tasks[0]
 	t.Tasks = t.Tasks[1:]
 	return first
 }
 
 func (t *TaskList) GetList() (string, error) {
-	data, err := json.Marshal(t)
+	if len(t.Tasks) > 1 {
+		data, err := json.Marshal(t.Tasks[1:])
+		if err != nil {
+			return "", err
+		} else {
+			return string(data), nil
+		}
+	} else {
+		return "[]", nil
+	}
+}
+
+func (t *TaskList) GetDurations() (string, error) {
+	var sum time.Duration
+	if len(t.Tasks) > 1 {
+		for _, task := range t.Tasks[1:] {
+			sum = sum + task.Duration
+		}
+	}
+
+	data, err := json.Marshal(TasksDurations{
+		Durations:      sum,
+		HumanDurations: fmt.Sprintf("%v", sum),
+	})
 	if err != nil {
 		return "", err
 	} else {
@@ -39,37 +74,28 @@ func (t *TaskList) GetList() (string, error) {
 	}
 }
 
-func (t *TaskList) GetDurations() string {
-	var sum time.Duration
-	for _, task := range t.Tasks {
-		sum = sum + task.Duration
+func (t *TaskList) RunSerial(wait bool) {
+	if runned {
+		log.Printf("Queued %d tasks. Current run schedulled", len(t.Tasks))
+		if wait {
+			wgSync.Wait()
+		}
+		return
+	} else {
+		runned = true
+		wgSync.Add(1)
+		for len(t.Tasks) > 0 {
+
+			locT := t.Tasks[0]
+			locT.doTask()
+			t.Pop()
+		}
+		wgSync.Done()
+		runned = false
 	}
-	return fmt.Sprintf("%s", sum)
-
 }
 
-var wg sync.WaitGroup
-
-func (t *TaskList) RunSerial() {
-	t.LimitedRun(1)
-}
-
-func (t *TaskList) LimitedRun(limit int) {
-	ch := make(chan int, limit)
-	for len(t.Tasks) > 0 {
-		wg.Add(1)
-		locT := t.Next()
-		ch <- 1
-		go locT.limitedTask(ch)
-	}
-	wg.Wait()
-}
-
-func (t *Task) limitedTask(ch chan int) {
-	defer func() {
-		_ = <-ch
-		defer wg.Done()
-	}()
+func (t *Task) doTask() {
 	log.Printf("Start task #%d duration: %v\n", t.Num, t.Duration)
 	time.Sleep(t.Duration)
 	log.Printf("Stop task  #%d after %v\n", t.Num, t.Duration)

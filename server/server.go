@@ -1,7 +1,10 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
 	"net/http"
 	"schedulizer/taskmaster"
 )
@@ -10,15 +13,23 @@ var taskList taskmaster.TaskList
 var number int
 
 func Run(addr string) error {
-	http.HandleFunc("/add", add)
-	http.HandleFunc("/schedule", schedule)
-	http.HandleFunc("/time", getTime)
+	var router = mux.NewRouter()
+	router.Use(commonMiddleware)
 
-	err := http.ListenAndServe(addr, nil)
-	if err != nil {
-		return err
-	}
-	return nil
+	router.HandleFunc("/add", add)
+	router.HandleFunc("/schedule", schedule)
+	router.HandleFunc("/time", getTime)
+	headersOk := handlers.AllowedHeaders([]string{"Authorization"})
+	originsOk := handlers.AllowedOrigins([]string{"*"})
+	methodsOk := handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"})
+	return http.ListenAndServe(addr, handlers.CORS(originsOk, headersOk, methodsOk)(router))
+}
+
+func commonMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Type", "application/json")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func add(w http.ResponseWriter, r *http.Request) {
@@ -34,17 +45,17 @@ func add(w http.ResponseWriter, r *http.Request) {
 		mode := r.FormValue("mode")
 		duration := r.FormValue("duration")
 		number = number + 1
-		taskList.Add(duration, mode, number)
+		added := taskList.Add(duration, mode, number)
 		switch mode {
 		case "sync":
-			taskList.RunSerial()
-			_, err := fmt.Fprintf(w, "Mode is a %s, duration is %s\n", mode, duration)
+			taskList.RunSerial(true)
+			err := json.NewEncoder(w).Encode(added)
 			if err != nil {
 				return
 			}
 		case "async":
-			go taskList.RunSerial()
-			_, err := fmt.Fprintf(w, "Mode is a %s, duration is %s\n", mode, duration)
+			go taskList.RunSerial(false)
+			err := json.NewEncoder(w).Encode(added)
 			if err != nil {
 				return
 			}
@@ -70,7 +81,7 @@ func schedule(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		_, err = fmt.Fprintf(w, data)
+		_, err = fmt.Fprint(w, data)
 		if err != nil {
 			return
 		}
@@ -85,7 +96,11 @@ func schedule(w http.ResponseWriter, r *http.Request) {
 func getTime(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		_, err := fmt.Fprintf(w, taskList.GetDurations())
+		dur, err := taskList.GetDurations()
+		if err != nil {
+			return
+		}
+		_, err = fmt.Fprintf(w, dur)
 		if err != nil {
 			return
 		}
