@@ -3,13 +3,16 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"schedulizer/taskmaster"
 )
 
-func Run(addr string) error {
+var taskList taskmaster.TaskList
+var number int
 
+func Run(addr string) error {
 	http.HandleFunc("/add", add)
 	http.HandleFunc("/schedule", schedule)
-	http.HandleFunc("/time", time)
+	http.HandleFunc("/time", getTime)
 
 	err := http.ListenAndServe(addr, nil)
 	if err != nil {
@@ -30,10 +33,28 @@ func add(w http.ResponseWriter, r *http.Request) {
 		}
 		mode := r.FormValue("mode")
 		duration := r.FormValue("duration")
-		_, err := fmt.Fprintf(w, "Mode is a %s, duration is %s\n", mode, duration)
-		if err != nil {
-			return
+		number = number + 1
+		taskList.Add(duration, mode, number)
+		switch mode {
+		case "sync":
+			taskList.RunSerial()
+			_, err := fmt.Fprintf(w, "Mode is a %s, duration is %s\n", mode, duration)
+			if err != nil {
+				return
+			}
+		case "async":
+			go taskList.RunSerial()
+			_, err := fmt.Fprintf(w, "Mode is a %s, duration is %s\n", mode, duration)
+			if err != nil {
+				return
+			}
+		default:
+			_, err := fmt.Fprintf(w, "Sorry, only (sync, async) values in field `mode` are supported.")
+			if err != nil {
+				return
+			}
 		}
+
 	default:
 		_, err := fmt.Fprintf(w, "Sorry, only POST method are supported.")
 		if err != nil {
@@ -45,8 +66,11 @@ func add(w http.ResponseWriter, r *http.Request) {
 func schedule(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		// TODO тут массив актуальных задач, стоящих в очереди на выполнение, в формате JSON.
-		_, err := fmt.Fprintf(w, "[]")
+		data, err := taskList.GetList()
+		if err != nil {
+			return
+		}
+		_, err = fmt.Fprintf(w, data)
 		if err != nil {
 			return
 		}
@@ -58,11 +82,10 @@ func schedule(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func time(w http.ResponseWriter, r *http.Request) {
+func getTime(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		// TODO оставшееся время на выполнение всех находящихся в очереди задач.
-		_, err := fmt.Fprintf(w, "queue is empty")
+		_, err := fmt.Fprintf(w, taskList.GetDurations())
 		if err != nil {
 			return
 		}
