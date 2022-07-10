@@ -1,0 +1,16 @@
+syntax = "proto2";
+
+import "person.proto";
+import "points.proto";
+
+message Team
+{
+    required string name = 1;
+    repeated Person teammates = 2;
+    optional Point city = 3;
+}
+
+message Teams
+{
+    repeated Team teams = 1;
+}

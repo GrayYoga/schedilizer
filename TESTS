@@ -1,0 +1,4 @@
+example1.pb -> names.proto:Names, cities.proto:City
+example2.pb -> points.proto:Points
+example3.pb -> person.proto:Person
+example4.pb -> teams.proto:Teams
